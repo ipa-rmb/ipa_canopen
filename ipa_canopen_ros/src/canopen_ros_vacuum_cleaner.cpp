@@ -385,7 +385,7 @@ int main(int argc, char **argv)
     // todo: allow identical module IDs of modules when they are on different CAN buses
 
 
-    ros::init(argc, argv, "canopen_ros_staubsauger");
+    ros::init(argc, argv, "canopen_ros_vacuum_cleaner");
     ros::NodeHandle n(""); // ("~");
 
     readParamsFromParameterServer(n);
@@ -453,9 +453,9 @@ int main(int argc, char **argv)
        // currentOperationModePublishers[it.first] = n.advertise<std_msgs::String>("/" + it.first + "/current_operationmode", 1);
 
         onCallbacks.push_back( boost::bind(STAUBon, _1, _2, it.first) );
-        onServices.push_back( n.advertiseService("/" + it.first + "/staub_on", onCallbacks.back()) );
+        onServices.push_back( n.advertiseService("/" + it.first + "/vacuum_on", onCallbacks.back()) );
         offCallbacks.push_back( boost::bind(STAUBoff, _1, _2, it.first) );
-        offServices.push_back( n.advertiseService("/" + it.first + "/staub_off", offCallbacks.back()) );
+        offServices.push_back( n.advertiseService("/" + it.first + "/vacuum_off", offCallbacks.back()) );
 
         //statePublishers[it.first] = n.advertise<pr2_controllers_msgs::JointTrajectoryControllerState>("/" + it.first + "/state", 1);
     }
