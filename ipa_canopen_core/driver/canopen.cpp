@@ -74,6 +74,15 @@ namespace canopen{
     std::map<uint16_t, std::function<void (const TPCANRdMsg m)> > incomingPDOHandlers;
     std::map<uint16_t, std::function<void (const TPCANRdMsg m)> > incomingEMCYHandlers;
     bool recover_active;
+    bool halt_active;
+    bool staub_active;
+
+    double volt_value;
+
+    bool halt_positive;
+    bool halt_negative;
+
+    uint8_t operation_mode;
 
     /***************************************************************/
     //		define init and recover sequence
@@ -176,6 +185,12 @@ namespace canopen{
 
         for (auto device : devices)
         {
+            if(device.second.getMotorState() == MS_OPERATION_ENABLED)
+            {
+                std::cout << "Node" << device.second.getCANid() << "is already operational" << std::endl;
+            }
+            else
+            {
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             std::cout << "Resetting CAN-device with CAN-ID " << (uint16_t)device.second.getCANid() << std::endl;
@@ -203,6 +218,7 @@ namespace canopen{
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             sendSDO((uint16_t)device.second.getCANid(), canopen::SYNC_TIMEOUT_FACTOR, (uint8_t)canopen::SYNC_TIMEOUT_FACTOR_DISABLE_TIMEOUT);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
 
         }
 
@@ -352,7 +368,41 @@ namespace canopen{
 
         }
     }
+void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInterval){
+           CAN_Close(h);
 
+           NMTmsg.ID = 0;
+           NMTmsg.MSGTYPE = 0x00;
+           NMTmsg.LEN = 2;
+
+           syncMsg.ID = 0x80;
+           syncMsg.MSGTYPE = 0x00;
+
+           syncMsg.LEN = 0x00;
+
+           recover_active = false;
+
+           if (!canopen::openConnection(deviceFile)){
+               std::cout << "Cannot open CAN device; aborting." << std::endl;
+               exit(EXIT_FAILURE);
+           }
+           else{
+               //std::cout << "Connection to CAN bus established" << std::endl;
+           }
+
+           if (atFirstInit){
+               canopen::initListenerThread(canopen::defaultListener);
+           }
+
+          for (auto device : devices){
+           canopen::sendNMT((uint16_t)device.second.getCANid(), canopen::NMT_START_REMOTE_NODE);
+           std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          }
+
+           if (atFirstInit)
+               atFirstInit = false;
+
+       }
     /***************************************************************/
     //		define state machine functions
     /***************************************************************/
@@ -562,7 +612,25 @@ namespace canopen{
         }
     }
 
+    void deviceManager_staubsauger() {
+
+        while (true) {
+            auto tic = std::chrono::high_resolution_clock::now();
+            if (!recover_active){
+                for (auto device : canopen::devices) {
+                    if (device.second.getInitialized()) {
+                        sendVol((uint16_t)device.second.getCANid(), canopen::volt_value);
+                    }
+                }
+                canopen::sendSync();
+                std::this_thread::sleep_for(syncInterval - (std::chrono::high_resolution_clock::now() - tic ));
+            }
+
+        }
+    }
+
     std::function< void (uint16_t CANid, double positionValue) > sendPos;
+    std::function< void (uint16_t CANid, double voltValue) > sendVol;
 
     void defaultPDOOutgoing(uint16_t CANid, double positionValue) {
         static const uint16_t myControlword = (CONTROLWORD_ENABLE_OPERATION | CONTROLWORD_ENABLE_IP_MODE);
@@ -580,6 +648,25 @@ namespace canopen{
         msg.DATA[6] = (mdegPos >> 16) & 0xFF;
         msg.DATA[7] = (mdegPos >> 24) & 0xFF;
         CAN_Write(h, &msg);
+    }
+
+    void defaultPDOOutgoing_staubsauger(uint16_t CANid, double Voltage)
+    {
+        TPCANMsg m;
+        m.ID = 13 + 0x200;//CANid + CANid + 0x600;
+        m.MSGTYPE = 0x00;
+        m.LEN = 8;
+        int32_t volts = Voltage;
+        m.DATA[0] = 0x00;
+        m.DATA[1] = volts & 0xFF;
+        m.DATA[2] = 0x00;
+        m.DATA[3] = 0x00;
+        m.DATA[4] = 0x00;
+        m.DATA[5] = 0x00;
+        m.DATA[6] = 0x00;
+        m.DATA[7] = 0x00;
+        CAN_Write(canopen::h, &m);
+
     }
 
     void defaultEMCY_incoming(uint16_t CANid, const TPCANRdMsg m) {
@@ -744,7 +831,7 @@ namespace canopen{
             // incoming PD0
             else if (m.Msg.ID >= 0x180 && m.Msg.ID <= 0x4FF){
                //std::cout << std::hex << "PDO received:  " << (m.Msg.ID - 0x180) << "  " << m.Msg.DATA[0] << " " << m.Msg.DATA[1] << " " << m.Msg.DATA[2] << " " << m.Msg.DATA[3] << " " << m.Msg.DATA[4] << " " << m.Msg.DATA[5] << " " << m.Msg.DATA[6] << " " <<  m.Msg.DATA[7] << " " << std::endl;
-               //std::cout << std::hex << "PDO received:  " << (uint16_t)(m.Msg.ID - 0x180) << "  " << (uint16_t)m.Msg.DATA[0] << " " << (uint16_t)m.Msg.DATA[1] << " " << (uint16_t)m.Msg.DATA[2] << " " << (uint16_t)m.Msg.DATA[3] << " " << (uint16_t)m.Msg.DATA[4] << " " << (uint16_t)m.Msg.DATA[5] << " " << (uint16_t)m.Msg.DATA[6] << " " <<  (uint16_t)m.Msg.DATA[7] << " " << std::endl;
+               std::cout << std::hex << "PDO received:  " << (uint16_t)(m.Msg.ID - 0x180) << "  " << (uint16_t)m.Msg.DATA[0] << " " << (uint16_t)m.Msg.DATA[1] << " " << (uint16_t)m.Msg.DATA[2] << " " << (uint16_t)m.Msg.DATA[3] << " " << (uint16_t)m.Msg.DATA[4] << " " << (uint16_t)m.Msg.DATA[5] << " " << (uint16_t)m.Msg.DATA[6] << " " <<  (uint16_t)m.Msg.DATA[7] << " " << std::endl;
                 if (incomingPDOHandlers.find(m.Msg.ID) != incomingPDOHandlers.end())
                     incomingPDOHandlers[m.Msg.ID](m);
             }
