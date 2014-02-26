@@ -631,6 +631,7 @@ namespace canopen{
     void init(std::string deviceFile, std::chrono::milliseconds syncInterval);
     void init_elmo(std::string deviceFile, std::chrono::milliseconds syncInterval);
     void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInterval);
+    void reset_staubsauger();
     void pre_init();
     void recover(std::string deviceFile, std::chrono::milliseconds syncInterval);
 	void recover_elmo(std::string deviceFile, std::chrono::milliseconds syncInterval);

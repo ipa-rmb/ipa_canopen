@@ -94,6 +94,8 @@ std::vector<std::string> jointNames;
 bool CANopenInit(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &res, std::string chainName)
 {
     ROS_INFO("Initializing modules");
+    canopen::reset_staubsauger();
+    ROS_INFO("(Reset done)");
     canopen::init_staubsauger(deviceFile, canopen::syncInterval);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -110,17 +112,23 @@ bool CANopenInit(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &r
 
     canopen::initDeviceManagerThread(canopen::deviceManager_staubsauger);
 
-    for (auto device : canopen::devices)
-    {
-        canopen::devices[(uint16_t)device.second.getCANid()].setInitialized(true);
+//    for (auto device : canopen::devices)
+//    {
+//        canopen::devices[(uint16_t)device.second.getCANid()].setInitialized(true);
+//
+//       // if(device.second.getHomingError())
+//         //   return false;
+//
+//    }
 
-       // if(device.second.getHomingError())
-         //   return false;
+    bool fault = false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	for (auto device : canopen::devices)
+	{
+		fault |= canopen::devices[(uint16_t)device.second.getCANid()].getFault();
+	}
 
-    }
-
-
-    res.success.data = true;
+    res.success.data = !fault;
     res.error_message.data = "";
     ROS_INFO("Init concluded");
     return true;
@@ -149,6 +157,19 @@ bool CANopenInit(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &r
 //    ROS_INFO("Recover concluded");
 //    return true;
 //}
+
+
+bool CANopenReset(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &res, std::string chainName)
+{
+    ROS_INFO("Resetting vacuum cleaner");
+    canopen::reset_staubsauger();
+
+    res.success.data = true;
+    res.error_message.data = "";
+    ROS_INFO("Reset concluded");
+    return true;
+}
+
 
 bool STAUBon(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &res, std::string chainName)
 {
@@ -422,6 +443,8 @@ int main(int argc, char **argv)
     std::vector<ros::ServiceServer> initServices;
     std::vector<TriggerType> recoverCallbacks;
     std::vector<ros::ServiceServer> recoverServices;
+    std::vector<TriggerType> resetCallbacks;
+    std::vector<ros::ServiceServer> resetServices;
     std::vector<SetOperationModeCallbackType> setOperationModeCallbacks;
     std::vector<ros::ServiceServer> setOperationModeServices;
     std::vector<TriggerType> offCallbacks;
@@ -434,7 +457,7 @@ int main(int argc, char **argv)
     std::map<std::string, ros::Publisher> currentOperationModePublishers;
     std::map<std::string, ros::Publisher> statePublishers;
     ros::Publisher jointStatesPublisher = n.advertise<sensor_msgs::JointState>("/joint_states", 1);
-    ros::Publisher diagnosticsPublisher = n.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1);
+    ros::Publisher diagnosticsPublisher = n.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics_vacuum_cleaner", 1);
 
     for (auto it : canopen::deviceGroups)
     {
@@ -444,6 +467,8 @@ int main(int argc, char **argv)
         initServices.push_back( n.advertiseService("/" + it.first + "/init", initCallbacks.back()) );
         //recoverCallbacks.push_back( boost::bind(CANopenRecover, _1, _2, it.first) );
         //recoverServices.push_back( n.advertiseService("/" + it.first + "/recover", recoverCallbacks.back()) );
+        resetCallbacks.push_back( boost::bind(CANopenReset, _1, _2, it.first) );
+        resetServices.push_back( n.advertiseService("/" + it.first + "/reset", resetCallbacks.back()) );
         //setOperationModeCallbacks.push_back( boost::bind(setOperationModeCallback, _1, _2, it.first) );
         //setOperationModeServices.push_back( n.advertiseService("/" + it.first + "/set_operation_mode", setOperationModeCallbacks.back()) );
 
@@ -540,7 +565,7 @@ int main(int argc, char **argv)
         //ROS_INFO("Referenced: %d", initialized_);
 
         // set data to diagnostics
-        if(error_)
+        if(error_==true)
         {
           diagstatus.level = 2;
           diagstatus.name = chainNames[0];

@@ -394,15 +394,30 @@ void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInte
                canopen::initListenerThread(canopen::defaultListener);
            }
 
-          for (auto device : devices){
-           canopen::sendNMT((uint16_t)device.second.getCANid(), canopen::NMT_START_REMOTE_NODE);
-           std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          for (auto device : devices)
+          {
+			   canopen::sendNMT((uint16_t)device.second.getCANid(), canopen::NMT_START_REMOTE_NODE);
+			   canopen::devices[(uint16_t)device.second.getCANid()].setInitialized(true);
+			   canopen::devices[(uint16_t)device.second.getCANid()].setFault(false);
+			 //  std::cout << "canopen::devices[(uint16_t)device.second.getCANid()].getFault()=" << canopen::devices[(uint16_t)device.second.getCANid()].getFault() << std::endl;
+			   std::this_thread::sleep_for(std::chrono::milliseconds(100));
           }
 
            if (atFirstInit)
                atFirstInit = false;
 
        }
+
+void reset_staubsauger()
+{
+	recover_active = true;
+    for (auto device : devices)
+    {
+    	canopen::sendNMT((uint16_t)device.second.getCANid(), canopen::NMT_RESET_NODE);
+    	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    recover_active = false;
+}
     /***************************************************************/
     //		define state machine functions
     /***************************************************************/
@@ -806,10 +821,14 @@ void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInte
     void defaultListener(){
         while(true){
             //std::cout << "Reading incoming data" << std::endl;
+        	bool attached = true;
+
             TPCANRdMsg m;
             errno = LINUX_CAN_Read(h, &m);
             if (errno)
+            {
                 perror("LINUX_CAN_Read() error");
+            }
 
             // incoming SYNC
             else if (m.Msg.ID == 0x080){
@@ -818,7 +837,7 @@ void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInte
 
             // incoming EMCY
             else if (m.Msg.ID >= 0x081 && m.Msg.ID <= 0x0FF){
-                std::cout << std::hex << "EMCY received:  " << (uint16_t)m.Msg.ID << "  " << (uint16_t)m.Msg.DATA[0] << " " << (uint16_t)m.Msg.DATA[1] << " " << (uint16_t)m.Msg.DATA[2] << " " << (uint16_t)m.Msg.DATA[3] << " " << (uint16_t)m.Msg.DATA[4] << " " << (uint16_t)m.Msg.DATA[5] << " " << (uint16_t)m.Msg.DATA[6] << " " << (uint16_t)m.Msg.DATA[7] << std::endl;
+            	std::cout << std::hex << "EMCY received:  " << (uint16_t)m.Msg.ID << "  " << (uint16_t)m.Msg.DATA[0] << " " << (uint16_t)m.Msg.DATA[1] << " " << (uint16_t)m.Msg.DATA[2] << " " << (uint16_t)m.Msg.DATA[3] << " " << (uint16_t)m.Msg.DATA[4] << " " << (uint16_t)m.Msg.DATA[5] << " " << (uint16_t)m.Msg.DATA[6] << " " << (uint16_t)m.Msg.DATA[7] << std::endl;
                 if (incomingEMCYHandlers.find(m.Msg.ID) != incomingEMCYHandlers.end())
                     incomingEMCYHandlers[m.Msg.ID](m);
             }
@@ -857,7 +876,33 @@ void init_staubsauger(std::string deviceFile, std::chrono::milliseconds syncInte
             }
             else{
                  std::cout << "Received unknown message" << std::endl;
+                 attached = false;
             }
+
+
+            if (attached == false)
+            {
+                for (auto device : canopen::devices)
+                {
+                    canopen::devices[(uint16_t)device.second.getCANid()].setInitialized(false);
+                    canopen::devices[(uint16_t)device.second.getCANid()].setFault(true);
+                }
+                //std::cout << "attached=false" <<std::endl;
+               //reset_staubsauger();
+            }
+            else
+            {
+            	// never comes to this place
+            	//std::cout << "attached=true" << std::endl;
+            	 for (auto device : canopen::devices)
+				{
+					canopen::devices[(uint16_t)device.second.getCANid()].setInitialized(true);
+					canopen::devices[(uint16_t)device.second.getCANid()].setFault(false);
+					//std::cout << "canopen::devices[(uint16_t)device.second.getCANid()].getFault()=" << canopen::devices[(uint16_t)device.second.getCANid()].getFault() << std::endl;
+				}
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 
