@@ -94,6 +94,16 @@ std::vector<std::string> jointNames;
 
 bool CANopenInit(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &res, std::string chainName)
 {
+	for (auto device : canopen::devices)
+    {
+    	if (device.second.getInitialized())
+    	{
+    		res.success.data = true;
+    		res.error_message.data = "already initialized";
+    		ROS_INFO("already initialized");
+    		return true;
+    	}
+	}
 
     canopen::init(deviceFile, canopen::syncInterval);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -129,23 +139,27 @@ bool CANopenInit(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &r
 bool CANopenRecover(cob_srvs::Trigger::Request &req, cob_srvs::Trigger::Response &res, std::string chainName)
 {
 
-
+	for (auto device : canopen::devices)
+    {
+    	if (not device.second.getInitialized())
+    	{
+    		res.success.data = false;
+    		res.error_message.data = "not initialized yet";
+    		ROS_INFO("not initialized yet");
+    		return true;
+    	}
+	}
 
     canopen::recover(deviceFile, canopen::syncInterval);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
 
     for (auto device : canopen::devices)
-    {
+    {    
         canopen::sendSDO(device.second.getCANid(), canopen::MODES_OF_OPERATION, canopen::MODES_OF_OPERATION_INTERPOLATED_POSITION_MODE);
         std::cout << "Setting IP mode for: " << (uint16_t)device.second.getCANid() << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    }
-    //canopen::initDeviceManagerThread(canopen::deviceManager);
-
-    for (auto device : canopen::devices)
-    {
         canopen::devices[device.second.getCANid()].setDesiredPos((double)device.second.getActualPos());
         canopen::devices[device.second.getCANid()].setDesiredVel(0);
 
@@ -194,9 +208,14 @@ void setVel(const brics_actuator::JointVelocities &msg, std::string chainName)
             velocities.push_back( it.value);
         }
 
+	int counter = 0;
+       
         for (auto device : canopen::devices)
         {
-            positions.push_back((double)device.second.getDesiredPos());
+		
+            double pos = (double)device.second.getDesiredPos();// + joint_limits_->getOffsets()[counter];
+            positions.push_back(pos);
+	    counter++;
         }
 
         joint_limits_->checkVelocityLimits(velocities);
@@ -294,7 +313,7 @@ void setJointConstraints(ros::NodeHandle n)
           ROS_ERROR("Unable to load robot model from parameter %s",full_param_name.c_str());
           n.shutdown();
       }
-      ROS_INFO("%s content\n%s", full_param_name.c_str(), xml_string.c_str());
+      //ROS_INFO("%s content\n%s", full_param_name.c_str(), xml_string.c_str());
 
       /// Get urdf model out of robot_description
       urdf::Model model;
@@ -435,12 +454,28 @@ int main(int argc, char **argv)
     {
 
     // iterate over all chains, get current pos and vel and publish as topics:
+	int counter = 0;
+        std::vector <double> positions;
+        std::vector <double> desired_positions;
+
+        for (auto device : canopen::devices)
+        {
+		
+            double pos = (double)device.second.getActualPos() + joint_limits_->getOffsets()[counter];
+            double des_pos = (double)device.second.getDesiredPos() + joint_limits_->getOffsets()[counter];
+            positions.push_back(pos);
+            desired_positions.push_back(des_pos);
+	    counter++;
+        }
+
         for (auto dg : (canopen::deviceGroups))
         {
             sensor_msgs::JointState js;
             js.name = dg.second.getNames();
             js.header.stamp = ros::Time::now(); // todo: possibly better use timestamp of hardware msg?
-            js.position = dg.second.getActualPos();
+	    
+            js.position = positions;//dg.second.getActualPos();
+            //std::cout << "Position" << js.position[0] << std::endl;
             js.velocity = dg.second.getActualVel();
             js.effort = std::vector<double>(dg.second.getNames().size(), 0.0);
             jointStatesPublisher.publish(js);
@@ -449,13 +484,14 @@ int main(int argc, char **argv)
             jtcs.header.stamp = js.header.stamp;
             jtcs.actual.positions = js.position;
             jtcs.actual.velocities = js.velocity;
-            jtcs.desired.positions = dg.second.getDesiredPos();
+            jtcs.desired.positions = desired_positions;//dg.second.getDesiredPos();
             jtcs.desired.velocities = dg.second.getDesiredVel();
             statePublishers[dg.first].publish(jtcs);
 
             std_msgs::String opmode;
             opmode.data = "velocity";
             currentOperationModePublishers[dg.first].publish(opmode);
+	    counter++;
         }
 
         // publishing diagnostic messages
