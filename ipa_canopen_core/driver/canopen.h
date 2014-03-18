@@ -803,6 +803,7 @@ namespace canopen{
 
     void initListenerThread(std::function<void ()> const& listener);
     void defaultListener();
+    void staubsaugerListener();
 }
 
 #endif
